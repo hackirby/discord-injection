@@ -11,6 +11,7 @@
 - Intercept backup codes requests
 - Intercept email/password changes requests
 - Intercept credit card/paypal adding
+- Logout user after initial injection
 - Block usage of QR Code to login
 - Block request to see devices
 

